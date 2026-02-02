@@ -1,51 +1,58 @@
-import time
 import os
+import time
 from google import genai
+from google.genai import errors
 from dotenv import load_dotenv
 
 load_dotenv()
-# Make sure your .env file has API_KEY=your_actual_key
 client = genai.Client(api_key=os.getenv('API_KEY'))
 
-# Your custom persona instructions
+MODEL_ID = "gemini-2.0-flash-lite" 
 yn_instructions = "You are a YN. Respond only in AAVE, using gangster slang and hood terms."
 
-def create_video_quiz(file_path):
-    print(f"Checking the tape at {file_path}... hold on twin.")
+def create_video_quiz_safe(file_path):
+    print(f"Checking the tape at {file_path}... stay solid.")
     
-    # 1. Upload the video to the Google File API
-    # This sends the MP4 from your computer to the AI's 'brain'
+    # 1. Upload
     video_file = client.files.upload(file=file_path)
     
-    # 2. Wait for processing
     while video_file.state.name == "PROCESSING":
-        print("AI watchin' the vid... stay patient...")
         time.sleep(5)
         video_file = client.files.get(name=video_file.name)
 
-    if video_file.state.name == "FAILED":
-        raise ValueError("The vid didn't load right. Check the file format.")
+    prompt = "Create a 5-question quiz based on this video with answers at the end."
 
-    print("Vid loaded. Cookin' up the questions now.")
+    # 2. Smart Retry Logic (Backoff)
+    max_retries = 3
+    wait_time = 30 # Start with 30 seconds
 
-    # 3. The specific request for the AI
-    prompt = "Watch this video and create a quiz with 5 challenging questions based on what happened. Include the answers at the end."
-    
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[video_file, prompt],
-        config={'system_instruction': yn_instructions}
-    )
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=[video_file, prompt],
+                config={'system_instruction': yn_instructions}
+            )
+            # Cleanup: Clear the cloud storage
+            client.files.delete(name=video_file.name)
+            return response.text
+            
+        except errors.ClientError as e:
+            if "429" in str(e):
+                if attempt < max_retries - 1:
+                    print(f"\n[!] Federal block. Too many requests. Cooling down for {wait_time}s...")
+                    time.sleep(wait_time)
+                    wait_time *= 2 # Wait longer next time
+                    continue
+                else:
+                    return "Yo, the ceiling is too low right now. Try again in a few minutes, twin."
+            raise e
 
-    return response.text
-
-# --- THIS IS WHERE YOU PUT THE PATH ---
 if __name__ == "__main__":
-    # I used an 'r' before the quotes so Windows doesn't get confused by the backslashes
-    target_video = r"C:\Users\S1806291\Downloads\Compsci26\Compsci26\gemini\gemini-ai\daigo.mp4"
+    # Fixed the .mp4.mp4 issue from before
+    target_video = r"C:\Users\S1806291\Downloads\Compsci26\Compsci26\gemini\gemini-ai\digo.mp4"
     
-    # This line triggers the whole process using the path above
-    quiz_result = create_video_quiz(target_video)
-    
-    print("\n--- HERE IS YOUR QUIZ ---")
-    print(quiz_result)
+    if os.path.exists(target_video):
+        print(create_video_quiz_safe(target_video))
+    else:
+        print(f"Yo, I still can't find the file at: {target_video}")
